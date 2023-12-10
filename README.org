@@ -110,10 +110,10 @@ After realizing this, I believed I could solve the problem by adding a ~recomput
       # use list instead of Tuple so we can mutate it;
       cell_to_flows = defaultdict(lambda: [False, False])
 
-!     def flows(row, col, recompute=False) -> Tuple[bool, bool]:
++     def flows(row, col, recompute=False) -> Tuple[bool, bool]:
           pos = (row, col)
 
-!         if not recompute and pos in cell_to_flows:
++         if not recompute and pos in cell_to_flows:
               return cell_to_flows[pos]
 
 +         # either gets default, if not present, OR gets current value if `recompute` is specified;
@@ -133,7 +133,7 @@ After realizing this, I believed I could solve the problem by adding a ~recomput
 
       for row in range(ROWS):
           for col in range(COLS):
-!             if all(flows(row, col, recompute=True)):
++             if all(flows(row, col, recompute=True)):
                   out.append([row, col])
 
       return out
