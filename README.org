@@ -1,0 +1,347 @@
+#+title: Pacific Atlantic Water Flow Analysis
+
+Link: https://leetcode.com/problems/pacific-atlantic-water-flow
+
+* Problem Description
+#+begin_quote
+There is an $m$ x $n$ rectangular island that borders both the Pacific Ocean and Atlantic Ocean. The Pacific Ocean touches the island's left and top edges, and the Atlantic Ocean touches the island's right and bottom edges.
+The island is partitioned into a grid of square cells. You are given an $m$ x $n$ integer matrix heights where heights[$r$][$c$] represents the height above sea level of the cell at coordinate ($r$, $c$).
+The island receives a lot of rain, and the rain water can flow to neighboring cells directly north, south, east, and west if the neighboring cell's height is less than or equal to the current cell's height. Water can flow from any cell adjacent to an ocean into the ocean.
+Return a 2D list of grid coordinates result where result[$i$] = [$ri$, $ci$] denotes that rain water can flow from cell ($ri$, $ci$) to both the Pacific and Atlantic oceans.
+#+end_quote
+
+* Solution Analysis
+- this is a problem I really struggled with; immediately upon reading the problem description, I fixated on an overcomplicated approach which made the problem much harder than it had to be
+- in the first part of my analysis, I'll go through what my initial approach was, explain why it was wrong, and then show what I had to do to make that approach work
+- in the second part, I'll show the proper way to do the problem, and attempt to extrapolate general lessons from my ordeal
+** Initial Approach (Wrong)
+- to briefly rephrase the problem description, we have to find a list of points for which there exists a path connecting the point and one of the points along the edge of the grid, such that the height at each successive point in the path is less than or equal to that of the previous points
+- the initial approach that I fixated on was trying to implement this "literally", by having a recursive function ~flows(row, col)~ which computes whether a given point can flow into 1. the Atlantic Ocean and 2. the Pacific Ocean
+  - this ~flows~ function would do a simple DFS, returning a ~Tuple[Bool, Bool]~ representing ~(flows_atlantic?, flows_pacific?)~
+  - I /wrongly/ believed that calling ~flows(row, col)~ $\forall$ ~row~ $\forall$ ~col~ (going from the top left of the grid to the bottom right) and memoizing the "flow state" of each cell between calls to prevent recomputations would be enough to solve the problem
+    #+begin_src python
+# NOTE: this implementation does /not/ work
+def pacificAtlantic(self, heights: List[List[int]]) -> List[List[int]]:
+    # approach: do a sort of DFS where you call `flows(row, col)` on an
+    # entry and then it yields (flows_pacific, flows_atlantic).
+    ROWS, COLS = len(heights), len(heights[0])
+
+    out = []
+
+    # use list instead of Tuple so we can mutate it;
+    cell_to_flows = defaultdict(lambda: [False, False])
+
+    def flows(row, col) -> Tuple[bool, bool]:
+        pos = (row, col)
+
+        if pos in cell_to_flows:
+            return cell_to_flows[pos]
+
+        # having this in place will also prevent infinite recursion from equal-height neighbors.
+        cell_flows = cell_to_flows[pos]
+
+        # flows pacific if top or left;
+        cell_flows[0] |= (row == 0 or col == 0)
+        # flows atlantic if bottom or right
+        cell_flows[1] |= (row == ROWS - 1 or col == COLS - 1)
+
+        # note: (row, col) must be in range.
+        equal_neighbors = []
+        for multiplier in (-1, 1):
+            for dx, dy in [(0, 1), (1, 0)]:
+                neighbor_row, neighbor_col = row + dx * multiplier, col + dy * multiplier
+
+                if neighbor_row in range(ROWS) and neighbor_col in range(
+                        COLS) and heights[row][col] >= heights[
+                            neighbor_row][neighbor_col]:
+                    neighbor_flows_pacific, neighbor_flows_atlantic = flows(
+                        neighbor_row, neighbor_col)
+
+                    cell_flows[0] |= neighbor_flows_pacific
+                    cell_flows[1] |= neighbor_flows_atlantic
+
+                    if heights[row][col] == heights[neighbor_row][
+                            neighbor_col]:
+                        equal_neighbors.append(
+                            (neighbor_row, neighbor_col))
+
+        for row, col in equal_neighbors:
+            neighbor_flows = cell_to_flows[(row, col)]
+            neighbor_flows[0] |= cell_flows[0]
+            neighbor_flows[1] |= cell_flows[1]
+
+        return cell_flows
+
+    for row in range(ROWS):
+        for col in range(COLS):
+            if all(flows(row, col)):
+                out.append([row, col])
+
+    return out
+    #+end_src
+
+- the *biggest problem* with this approach was dealing with _equal elements_, and figuring out how to properly "backflow" such that the end result is not affected by the DFS ordering
+  - consider the following case:
+    1. *A* recursively flows into *B*
+    2. *B* flows back into *A*, inheriting *A*'s /initial/ flow state
+    3. The call to *B* returns
+    4. *A* flows into *C*, /changing/ the flow state of *A* (meaning that *C* flows into an ocean that *A* did not yet flow into)
+  - in the end, *B*'s flow state will not reflect the flows from *A* which came /after/ it initially flowed into *B*
+
+- after realizing this, I believed I could solve the problem by adding a ~recompute~ flag to ~flows~, which if passed, would recompute the flow state based on the new states of its direct neighbors
+  #+begin_src diff
+,*** /tmp/old.py	2023-12-10 14:56:52.770721117 -0500
+--- /tmp/new.py	2023-12-10 14:56:57.797361802 -0500
+,***************
+,*** 9,20 ****
+      # use list instead of Tuple so we can mutate it;
+      cell_to_flows = defaultdict(lambda: [False, False])
+
+!     def flows(row, col) -> Tuple[bool, bool]:
+          pos = (row, col)
+
+!         if pos in cell_to_flows:
+              return cell_to_flows[pos]
+
+          # having this in place will also prevent infinite recursion from equal-height neighbors.
+          cell_flows = cell_to_flows[pos]
+
+--- 9,21 ----
+      # use list instead of Tuple so we can mutate it;
+      cell_to_flows = defaultdict(lambda: [False, False])
+
+!     def flows(row, col, recompute=False) -> Tuple[bool, bool]:
+          pos = (row, col)
+
+!         if not recompute and pos in cell_to_flows:
+              return cell_to_flows[pos]
+
++         # either gets default, if not present, OR gets current value if `recompute` is specified;
+          # having this in place will also prevent infinite recursion from equal-height neighbors.
+          cell_flows = cell_to_flows[pos]
+
+,***************
+,*** 52,58 ****
+
+      for row in range(ROWS):
+          for col in range(COLS):
+!             if all(flows(row, col)):
+                  out.append([row, col])
+
+      return out
+--- 53,59 ----
+
+      for row in range(ROWS):
+          for col in range(COLS):
+!             if all(flows(row, col, recompute=True)):
+                  out.append([row, col])
+
+      return out
+  #+end_src
+  - in the prior case, this would mean that after calling ~flows(A_row, A_col)~, we could call ~flows(B_row, B_col, recompute=True)~ and the flow state of ~B~ would be updated to reflect the new state of ~A~
+  - however, I failed to realize that this simple approach was not enough to solve the problem in all cases, because recomputing /only/ based on direct neighbors is insufficient
+    - this will have consequences even past equivalent elements; if an element greater than ~B~ tries to flow into it before it gets ~recompute~'d, it will be told that ~B~ does not flow into the ocean bordering ~C~, and thus will itself get the wrong answer
+** Coroutine/Generator Approach
+- my extremely complicated implementation for addressing this was to take a [[dabeaz.com/coroutines/Coroutines.pdf][coroutine]] approach, ~yield~'ing an initial value after doing a DFS while _skipping_ the backflow, and having the caller explicitly pass in the backflow value by ~send~​ing the value into the generator
+  - in other words, we have each call to ~flows~ do as much work as it can, /deferring/ the backflow call until /after/ its caller has finished doing the rest of its own work
+    - then, once the caller ~send~'s in its final value, we update our state accordingly and propagate the changes to any recursive calls which are waiting on /us/!
+  - along the way, I ran into a lot of issues caused by the lazy nature of generators; for instance, forgetting to explicitly *consume* the generator even after getting what I needed, because after the initial ~yield~ the function would then run its backflow propagation code
+#+begin_src python
+from typing import List, Tuple
+from collections import defaultdict, deque
+
+
+class Solution:
+
+    def pacificAtlantic(self, heights: List[List[int]]) -> List[List[int]]:
+        # approach: do a sort of DFS where you call `flows(row, col)` on an
+        # entry and then it yields (flows_pacific, flows_atlantic).
+        ROWS, COLS = len(heights), len(heights[0])
+
+        out = []
+
+        # use list instead of Tuple so we can mutate it;
+        cell_to_flows = defaultdict(lambda: [False, False])
+
+        path = set()
+
+        def flows(row, col):
+            # note: (row, col) must be in range.
+            pos = (row, col)
+
+            if pos in cell_to_flows:
+                # NOTE: have to `yield` before `return` because in generators,
+                # `return` raises `StopIteration`
+                yield cell_to_flows[pos]
+                return
+
+            path.add(pos)
+
+            # gets default, if not present
+            cell_flows = cell_to_flows[pos]
+
+            def or_flows(new_flows):
+                pacific, atlantic = new_flows
+                cell_flows[0] |= pacific
+                cell_flows[1] |= atlantic
+
+            or_flows([
+                # flows pacific if top or left;
+                (row == 0 or col == 0),
+                # flows atlantic if bottom or right
+                (row == ROWS - 1 or col == COLS - 1)
+            ])
+
+            equal_generators = []
+
+            awaiting_backflow = False
+            for multiplier in (-1, 1):
+                for dx, dy in [(0, 1), (1, 0)]:
+                    neighbor_row, neighbor_col = row + dx * multiplier, col + dy * multiplier
+
+                    if neighbor_row in range(ROWS) and neighbor_col in range(
+                            COLS):
+                        if heights[row][col] > heights[neighbor_row][
+                                neighbor_col]:
+                            # `yield` within a function AT ALL will result in
+                            # the entire function being wrapped in a generator;
+                            # thus, even in this case we need to use `next`.
+                            neighbor_flows = flows(neighbor_row, neighbor_col)
+                            or_flows(next(neighbor_flows))
+                        elif heights[row][col] == heights[neighbor_row][
+                                neighbor_col]:
+                            neighbor_pos = (neighbor_row, neighbor_col)
+                            if neighbor_pos in path:
+                                # then, we will await backflow;
+                                # we don't need to access this `pos`
+                                # specifically, because in order for `pos` to
+                                # be in `path`, EVERY entry in `path` must have
+                                # the same height; otherwise you wouldn't be
+                                # able to do this kind of loop; thus, we can
+                                # simply use our coroutine propagation and we
+                                # will be able to get the correct answer. in
+                                # other words, if ANY entry in `path` gets a
+                                # new flow, it will be propagated to all later
+                                # entries.
+                                awaiting_backflow = True
+                            elif neighbor_pos not in cell_to_flows:
+                                already_processed = neighbor_pos in cell_to_flows
+
+                                generator = flows(neighbor_row, neighbor_col)
+
+                                # first, get the initial flow value.
+                                initial_flow = next(generator)
+                                or_flows(initial_flow)
+
+                                if not already_processed:
+                                    # add it to list of generators to send final value to;
+                                    # don't flow into it in the case where it would just early-return.
+                                    equal_generators.append(generator)
+
+            path.remove(pos)
+
+            if awaiting_backflow:
+                # NOTE: `yield` ALWAYS returns the next `send` value, and None
+                # incase there is nothing sent before the next call to `next`.
+                backflow_result = yield cell_flows
+                or_flows(backflow_result)
+
+            for generator in equal_generators:
+                # send our final value to each generator
+                generator.send(cell_flows)
+
+            # here we yield `cell_flows` even in the case where
+            # `awaiting_backflow` is True, and the caller doesn't actually need
+            # the value. we do this because `generator.send` implicitly calls
+            # `next` on the generator and returns that value; if there is
+            # nothing left in the generator, it will raise a `StopIteration`
+            # exception. to prevent this, we simply yield unconditionally so
+            # that the `generator.send` doesn't error out.
+            yield cell_flows
+
+        for row in range(ROWS):
+            for col in range(COLS):
+                pos_flows = flows(row, col)
+                if all(next(pos_flows)):
+                    out.append([row, col])
+
+                # consume generator so that it continues to do backflow if needed.
+                # source: https://stackoverflow.com/questions/50937966/fastest-most-pythonic-way-to-consume-an-iterator.
+                # alternatively, since we know there will only be one more yield in any case, we could do `next(pos_flows, None)`
+                deque(pos_flows, maxlen=0)
+
+        return out
+#+end_src
+*** Python-Specific Takeaways
+- in Python, using ~yield~ *anywhere* in a function definition turns the function into a generator;
+  it doesn't let you /conditionally/ yield in some paths and return normally in others, because this would be a massive pain to work with
+- also, remember that in order to have code run after a ~yield~, you need to either ~send~ a value into the generator or prompt for the next value, even if it will be thrown away
+  - on the topic of ~send~, ~send~'s input value will become the result of the ~yield~ expression within the generator
+  - also, ~send~ will return the value of ~next~, so make sure that you either handle ~StopIteration~ /or/ ~yield~ something afterwards to prevent the exception from being raised
+- lastly, ~return~ raises the ~StopIteration~ exception, so make sure to use ~yield~ instead, even when early-returning;
+  rather than ~return foobar~, do ~yield foobar; return~
+  - ~return foobar~ will raise ~StopIteration~ with ~foobar~ attached, which is pretty much never what you want
+** Proper Approach
+- a /far simpler/ approach to this problem is to "go the other way"; instead of searching for the oceans from each cell, we can instead _start_ at each ocean cell and recursively search for cells that can reach it!
+  - this approach has none of the ~recompute~ and backflow complications from earlier, because each ~dfs~ call has a single purpose: declaring that ~(row, col)~ flows into the given ocean!
+  - for fun, let's use bit-masking and store our state in a bitvector, accumulating ~output~ as we go along
+
+#+begin_src python
+class Solution:
+
+    def pacificAtlantic(self, heights: List[List[int]]) -> List[List[int]]:
+        # approach: inspired by Neetcode; instead of DFS'ing from every single
+        # cell, trying to search for the ocean, DFS from each ocean-bordering
+        # cell and go into every cell which flows into it.
+        ROWS, COLS = len(heights), len(heights[0])
+
+        pacific_bitmask = 1
+        atlantic_bitmask = 2
+
+        pacific_atlantic_bitvector = [0] * (ROWS * COLS)
+
+        output = []
+
+        def dfs(row, col, ocean_bitmask):
+            pos = (row, col)
+
+            # MISTAKE: did `row * ROWS + col`
+            pos_bitvector_index = row * COLS + col
+
+            # already in set
+            if pacific_atlantic_bitvector[pos_bitvector_index] & ocean_bitmask > 0:
+                return
+
+            # otherwise, add it to ocean_set
+            pacific_atlantic_bitvector[pos_bitvector_index] |= ocean_bitmask
+
+            if pacific_atlantic_bitvector[pos_bitvector_index] == pacific_bitmask | atlantic_bitmask:
+                output.append([row, col])
+
+            # now, go into all valid neighbors
+            for multiplier in (-1, 1):
+                for dx, dy in [(0, 1), (1, 0)]:
+                    neighbor_row, neighbor_col = row + dx * multiplier, col + dy * multiplier
+                    if (neighbor_row in range(ROWS)
+                            and neighbor_col in range(COLS)
+                            and heights[neighbor_row][neighbor_col]
+                            >= heights[row][col]):
+                        dfs(neighbor_row, neighbor_col, ocean_bitmask)
+
+        # now, let's DFS from every ocean cell
+        for r in range(ROWS):
+            dfs(r, 0, pacific_bitmask)
+            dfs(r, COLS - 1, atlantic_bitmask)
+
+        for c in range(COLS):
+            dfs(0, c, pacific_bitmask)
+            dfs(ROWS - 1, c, atlantic_bitmask)
+
+        return output
+#+end_src
+** Overall Takeaways
+- in certain problems, rather than blindly trying to go from the source to the target, it's easier to go from the _target_ to the _source_!
+  - I encountered this pattern again while doing the [[https://cses.fi/problemset/task/1161][Stick Divisions]] problem; briefly, rather than trying to blindly divide sticks into appropriate partitions, ending up with the target state, the solution was to /start/ from the target state and work /backwards/ to reach the initial state
+  - similarly, in this problem, rather than attempting to find which cells flowed into both oceans, we instead started from each ocean cell and saw which cells could flow into it!
+
+- in summary, when you can't think of a solution for going from A -> B, consider working backwards from B -> A and see if it's easier!
